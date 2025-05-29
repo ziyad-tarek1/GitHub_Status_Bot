@@ -58,11 +58,21 @@ jobs:
             if [ "$sent" = "false" ]; then
               echo "New incident event detected: $name ($status)"
 
+              ##############################################################################################################
+              # if [ "$status" = "resolved" ]; then
+              #   message="✅ *Resolved GitHub Incident*: *$name*\nStatus: *$status*\n📅 Resolved At: $resolved_at\n🔗 $shortlink"
+              # else
+              #   message="🚨 *New GitHub Incident*: *$name*\nStatus: *$status*\n📅 Created At: $created_at\n🔗 $shortlink"
+              # fi
+              ##############################################################################################################
               if [ "$status" = "resolved" ]; then
-                message="✅ *Resolved GitHub Incident*: *$name*\nStatus: *$status*\n📅 Resolved At: $resolved_at\n🔗 $shortlink"
+                formatted_resolved_at=$(date -u -d "$resolved_at" '+%b %d, %H:%M UTC' 2>/dev/null || echo "$resolved_at")
+                message="✅ *Resolved GitHub Incident*: *$name*\nStatus: *$status*\n📅 Resolved At: $formatted_resolved_at\n🔗 $shortlink"
               else
-                message="🚨 *New GitHub Incident*: *$name*\nStatus: *$status*\n📅 Created At: $created_at\n🔗 $shortlink"
+                formatted_created_at=$(date -u -d "$created_at" '+%b %d, %H:%M UTC' 2>/dev/null || echo "$created_at")
+                message="🚨 *New GitHub Incident*: *$name*\nStatus: *$status*\n📅 Created At: $formatted_created_at\n🔗 $shortlink"
               fi
+
 
               curl -X POST -H 'Content-type: application/json' \
                 --data "{\"text\":\"$message\"}" \
