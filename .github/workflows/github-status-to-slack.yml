@@ -38,11 +38,11 @@ jobs:
             updated_at=$(echo "$incident" | jq -r '.updated_at')
             resolved_at=$(echo "$incident" | jq -r '.resolved_at // empty')
 
-            # Only process incidents created or updated in the past 48 hours
+            # Only process incidents created or updated in the past 12 hours
             now=$(date -u +%s)
             incident_time=$(date -u -d "$updated_at" +%s || echo 0)
             age=$(( (now - incident_time) / 3600 ))
-            if [ "$incident_time" -eq 0 ] || [ "$age" -gt 48 ]; then
+            if [ "$incident_time" -eq 0 ] || [ "$age" -gt 12 ]; then
               echo "Skipping old incident $id (age ${age}h)"
               continue
             fi
