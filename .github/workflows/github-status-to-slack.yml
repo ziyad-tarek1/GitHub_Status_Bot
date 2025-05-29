@@ -1,0 +1,83 @@
+name: GitHub Status Multi-Incident Monitor
+
+on:
+#   schedule:
+#     - cron: '*/15 * * * *'
+  workflow_dispatch:
+
+jobs:
+  github-status-to-slack:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Restore incident log cache
+        id: restore-cache
+        uses: actions/cache@v4
+        with:
+          path: .gh-status
+          key: github-status-cache-v1
+
+      - name: Fetch GitHub Incidents
+        run: |
+          mkdir -p .gh-status
+          curl -s https://www.githubstatus.com/api/v2/incidents.json > .gh-status/incidents.json
+
+      - name: Compare incidents and post to Slack
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+        run: |
+          jq -c '.incidents[]' .gh-status/incidents.json | while read -r incident; do
+            id=$(echo "$incident" | jq -r '.id')
+            name=$(echo "$incident" | jq -r '.name')
+            status=$(echo "$incident" | jq -r '.status')
+            shortlink=$(echo "$incident" | jq -r '.shortlink // empty')
+            created_at=$(echo "$incident" | jq -r '.created_at')
+            updated_at=$(echo "$incident" | jq -r '.updated_at')
+            resolved_at=$(echo "$incident" | jq -r '.resolved_at // empty')
+
+            # Only process incidents created or updated in the past 48 hours
+            now=$(date -u +%s)
+            incident_time=$(date -u -d "$updated_at" +%s || echo 0)
+            age=$(( (now - incident_time) / 3600 ))
+            if [ "$incident_time" -eq 0 ] || [ "$age" -gt 48 ]; then
+              echo "Skipping old incident $id (age ${age}h)"
+              continue
+            fi
+
+            log_file=".gh-status/incident_log.json"
+            touch "$log_file"
+            if ! [ -s "$log_file" ]; then echo '[]' > "$log_file"; fi
+
+            sent=$(jq -r --arg id "$id" --arg status "$status" '
+              map(select(.id == $id and .status == $status)) | length > 0
+            ' "$log_file")
+
+            if [ "$sent" = "false" ]; then
+              echo "New incident event detected: $name ($status)"
+
+              if [ "$status" = "resolved" ]; then
+                message="✅ *Resolved GitHub Incident*: *$name*\nStatus: *$status*\n📅 Resolved At: $resolved_at\n🔗 $shortlink"
+              else
+                message="🚨 *New GitHub Incident*: *$name*\nStatus: *$status*\n📅 Created At: $created_at\n🔗 $shortlink"
+              fi
+
+              curl -X POST -H 'Content-type: application/json' \
+                --data "{\"text\":\"$message\"}" \
+                "$SLACK_WEBHOOK_URL"
+
+              tmp_log=$(mktemp)
+              jq --arg id "$id" --arg status "$status" '. += [{"id": $id, "status": $status}]' "$log_file" > "$tmp_log"
+              mv "$tmp_log" "$log_file"
+            else
+              echo "Incident $id with status $status already posted."
+            fi
+          done
+
+      - name: Save updated incident log
+        uses: actions/cache/save@v4
+        with:
+          path: .gh-status
+          key: github-status-cache-v1
