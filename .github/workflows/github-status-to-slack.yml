@@ -31,6 +31,8 @@ jobs:
           # Ensure file exists and is writable
           touch .incident_cache
           chmod 644 .incident_cache
+          echo "Cache file permissions:"
+          ls -l .incident_cache
 
       - name: Fetch and filter incidents
         id: filter
@@ -47,7 +49,7 @@ jobs:
 
           # Function to format date for display
           format_date() {
-            local date_str=$1
+            local date_str=$1x
             if [ -z "$date_str" ] || [ "$date_str" = "null" ]; then
               echo "N/A"
               return
@@ -70,12 +72,19 @@ jobs:
             local status=$3
             local temp_file=$(mktemp)
             
+            echo "Updating cache for incident $id"
+            echo "Current cache contents:"
+            cat .incident_cache
+            
             # Remove old entry if exists
             grep -v "^$id:" .incident_cache > "$temp_file" 2>/dev/null || true
             # Add new entry
             echo "$id:$updated_at:$status" >> "$temp_file"
             # Replace cache file
             mv "$temp_file" .incident_cache
+            
+            echo "Updated cache contents:"
+            cat .incident_cache
           }
 
           # Fetch and validate incidents
@@ -217,6 +226,12 @@ jobs:
             fi
             i=$((i+10))
           done
+
+      - name: Verify cache file
+        run: |
+          echo "Verifying cache file before upload..."
+          ls -l .incident_cache
+          cat .incident_cache
 
       - name: Upload cache as artifact
         uses: actions/upload-artifact@v4
