@@ -49,7 +49,7 @@ jobs:
 
           # Function to format date for display
           format_date() {
-            local date_str=$1x
+            local date_str=$1
             if [ -z "$date_str" ] || [ "$date_str" = "null" ]; then
               echo "N/A"
               return
@@ -151,6 +151,8 @@ jobs:
               fi
             else
               echo "  Not a recent update - skipping"
+              # Still update cache for non-recent incidents to maintain state
+              update_cache "$id" "$updated_at" "$status"
             fi
           done
 
