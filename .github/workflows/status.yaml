@@ -9,6 +9,11 @@ jobs:
   check-status:
     runs-on: ubuntu-latest
     steps:
+      - name: Show current run time
+        run: |
+          echo "Current workflow run time: $(date -u +"%Y-%m-%dT%H:%M:%S.%3NZ")"
+          echo "This time will be used as reference for the 20-minute window check"
+
       - name: Checkout repository
         uses: actions/checkout@v3
 
