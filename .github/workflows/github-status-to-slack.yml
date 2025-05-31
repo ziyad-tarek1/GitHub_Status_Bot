@@ -1,97 +1,3 @@
-# name: GitHub Status Multi-Incident Monitor
-
-# on:
-#   # schedule:
-#   #   - cron: '*/20 * * * *'
-#   workflow_dispatch:
-
-# jobs:
-#   github-status-to-slack:
-#     runs-on: ubuntu-latest
-
-#     steps:
-#       - name: Checkout
-#         uses: actions/checkout@v4
-
-#       - name: Restore incident log cache
-#         id: restore-cache
-#         uses: actions/cache@v4
-#         with:
-#           path: .gh-status
-#           key: github-status-cache-v1
-
-#       - name: Fetch GitHub Incidents
-#         run: |
-#           mkdir -p .gh-status
-#           curl -s https://www.githubstatus.com/api/v2/incidents.json > .gh-status/incidents.json
-
-#       - name: Compare incidents and post to Slack
-#         env:
-#           SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
-#         run: |
-#           jq -c '.incidents[]' .gh-status/incidents.json | while read -r incident; do
-#             id=$(echo "$incident" | jq -r '.id')
-#             name=$(echo "$incident" | jq -r '.name')
-#             status=$(echo "$incident" | jq -r '.status')
-#             shortlink=$(echo "$incident" | jq -r '.shortlink // empty')
-#             created_at=$(echo "$incident" | jq -r '.created_at')
-#             updated_at=$(echo "$incident" | jq -r '.updated_at')
-#             resolved_at=$(echo "$incident" | jq -r '.resolved_at // empty')
-
-#             # Only process incidents created or updated in the past 12 hours
-#             now=$(date -u +%s)
-#             incident_time=$(date -u -d "$updated_at" +%s || echo 0)
-#             age=$(( (now - incident_time) / 3600 ))
-#             if [ "$incident_time" -eq 0 ] || [ "$age" -gt 12 ]; then
-#               echo "Skipping old incident $id (age ${age}h)"
-#               continue
-#             fi
-
-#             log_file=".gh-status/incident_log.json"
-#             touch "$log_file"
-#             if ! [ -s "$log_file" ]; then echo '[]' > "$log_file"; fi
-
-#             sent=$(jq -r --arg id "$id" --arg status "$status" '
-#               map(select(.id == $id and .status == $status)) | length > 0
-#             ' "$log_file")
-
-#             if [ "$sent" = "false" ]; then
-#               echo "New incident event detected: $name ($status)"
-
-#               ##############################################################################################################
-#               # if [ "$status" = "resolved" ]; then
-#               #   message="✅ *Resolved GitHub Incident*: *$name*\nStatus: *$status*\n📅 Resolved At: $resolved_at\n🔗 $shortlink"
-#               # else
-#               #   message="🚨 *New GitHub Incident*: *$name*\nStatus: *$status*\n📅 Created At: $created_at\n🔗 $shortlink"
-#               # fi
-#               ##############################################################################################################
-#               if [ "$status" = "resolved" ]; then
-#                 formatted_resolved_at=$(date -u -d "$resolved_at" '+%b %d, %H:%M UTC' 2>/dev/null || echo "$resolved_at")
-#                 message="✅ *Resolved GitHub Incident*: *$name*\nStatus: *$status*\n📅 Resolved At: $formatted_resolved_at\n🔗 $shortlink"
-#               else
-#                 formatted_created_at=$(date -u -d "$created_at" '+%b %d, %H:%M UTC' 2>/dev/null || echo "$created_at")
-#                 message="🚨 *New GitHub Incident*: *$name*\nStatus: *$status*\n📅 Created At: $formatted_created_at\n🔗 $shortlink"
-#               fi
-
-
-#               curl -X POST -H 'Content-type: application/json' \
-#                 --data "{\"text\":\"$message\"}" \
-#                 "$SLACK_WEBHOOK_URL"
-
-#               tmp_log=$(mktemp)
-#               jq --arg id "$id" --arg status "$status" '. += [{"id": $id, "status": $status}]' "$log_file" > "$tmp_log"
-#               mv "$tmp_log" "$log_file"
-#             else
-#               echo "Incident $id with status $status already posted."
-#             fi
-#           done
-
-#       - name: Save updated incident log
-#         uses: actions/cache/save@v4
-#         with:
-#           path: .gh-status
-#           key: github-status-cache-v1
-
 name: Check GitHub Status and Notify Slack
 
 on:
@@ -122,6 +28,9 @@ jobs:
             echo "Using existing cache file"
             cat .incident_cache
           fi
+          # Ensure file exists and is writable
+          touch .incident_cache
+          chmod 644 .incident_cache
 
       - name: Fetch and filter incidents
         id: filter
@@ -152,6 +61,21 @@ jobs:
               echo "Error: Invalid JSON response from GitHub Status API"
               exit 1
             fi
+          }
+
+          # Function to safely update cache
+          update_cache() {
+            local id=$1
+            local updated_at=$2
+            local status=$3
+            local temp_file=$(mktemp)
+            
+            # Remove old entry if exists
+            grep -v "^$id:" .incident_cache > "$temp_file" 2>/dev/null || true
+            # Add new entry
+            echo "$id:$updated_at:$status" >> "$temp_file"
+            # Replace cache file
+            mv "$temp_file" .incident_cache
           }
 
           # Fetch and validate incidents
@@ -210,6 +134,9 @@ jobs:
                 echo "Resolved: $resolved_at" >> new_incidents.txt
                 echo "URL: $url" >> new_incidents.txt
                 echo "Shortlink: $shortlink" >> new_incidents.txt
+                
+                # Update cache immediately
+                update_cache "$id" "$updated_at" "$status"
               else
                 echo "  No changes detected - skipping"
               fi
@@ -287,12 +214,6 @@ jobs:
               curl -X POST -H 'Content-type: application/json' \
                 --max-time 10 \
                 --data "$payload" "$SLACK_WEBHOOK"
-
-              echo "Updating cache..."
-              # Update cache
-              grep -v "^$id:" .incident_cache > .incident_cache.tmp
-              mv .incident_cache.tmp .incident_cache
-              echo "$id:$updated_at:$status" >> .incident_cache
             fi
             i=$((i+10))
           done
