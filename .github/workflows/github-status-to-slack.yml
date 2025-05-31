@@ -1,4 +1,4 @@
-name: Check GitHub Status and Notify Slack
+name:  GitHub Status and Notify Slack
 
 on:
   schedule:
