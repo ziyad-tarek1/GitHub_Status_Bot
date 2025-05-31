@@ -28,11 +28,14 @@ jobs:
           
           echo "Workflow ID: $workflow_id"
           
-          # Get the previous successful run
+          # Get the previous successful run (excluding current run)
           echo "Getting previous successful run..."
+          current_run_id=${{ github.run_id }}
+          echo "Current run ID: $current_run_id"
+          
           previous_run_id=$(curl -s -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
-            "https://api.github.com/repos/${{ github.repository }}/actions/workflows/$workflow_id/runs?status=success&branch=${{ github.ref_name }}&per_page=1" | \
-            jq -r '.workflow_runs[0].id')
+            "https://api.github.com/repos/${{ github.repository }}/actions/workflows/$workflow_id/runs?status=success&branch=${{ github.ref_name }}&per_page=2" | \
+            jq -r ".workflow_runs[] | select(.id != $current_run_id) | .id" | head -n 1)
           
           echo "Previous run ID: $previous_run_id"
           
