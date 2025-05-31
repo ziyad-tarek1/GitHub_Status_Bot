@@ -92,7 +92,6 @@
 #           path: .gh-status
 #           key: github-status-cache-v1
 
-
 name: Check GitHub Status and Notify Slack
 
 on:
@@ -118,6 +117,10 @@ jobs:
         run: |
           if [ ! -f .incident_cache ]; then
             touch .incident_cache
+            echo "Created new cache file"
+          else
+            echo "Using existing cache file"
+            cat .incident_cache
           fi
 
       - name: Fetch and filter incidents
@@ -152,12 +155,14 @@ jobs:
           }
 
           # Fetch and validate incidents
+          echo "Fetching incidents from GitHub Status API..."
           curl -s --max-time 10 https://www.githubstatus.com/api/v2/incidents.json > incidents.json
           validate_json incidents.json
 
           NOW=$(date +%s)
           echo "" > new_incidents.txt
 
+          echo "Processing incidents..."
           jq -c '.incidents[]' incidents.json | while read -r incident; do
             id=$(echo "$incident" | jq -r '.id')
             name=$(echo "$incident" | jq -r '.name')
@@ -178,14 +183,24 @@ jobs:
             updated_age=$((NOW - updated_epoch))
             resolved_age=$((NOW - resolved_epoch))
 
+            echo "Processing incident: $id ($name)"
+            echo "  Status: $status"
+            echo "  Updated age: $updated_age seconds"
+
             # Check if this is a recent update (within last 20 minutes)
             if [ $updated_age -le 1200 ]; then
+              echo "  Recent update found (within 20 minutes)"
               cached_entry=$(grep "^$id:" .incident_cache || true)
               cached_updated_at=$(echo "$cached_entry" | cut -d':' -f2)
               cached_status=$(echo "$cached_entry" | cut -d':' -f3)
 
+              echo "  Cache entry: $cached_entry"
+              echo "  Cached updated_at: $cached_updated_at"
+              echo "  Cached status: $cached_status"
+
               # Only process if status changed or not in cache
               if [ "$cached_updated_at" != "$updated_at" ] || [ "$cached_status" != "$status" ]; then
+                echo "  Changes detected - will send notification"
                 echo "$id:$updated_at:$status" >> new_incidents.txt
                 echo "---" >> new_incidents.txt
                 echo "Name: $name" >> new_incidents.txt
@@ -195,7 +210,11 @@ jobs:
                 echo "Resolved: $resolved_at" >> new_incidents.txt
                 echo "URL: $url" >> new_incidents.txt
                 echo "Shortlink: $shortlink" >> new_incidents.txt
+              else
+                echo "  No changes detected - skipping"
               fi
+            else
+              echo "  Not a recent update - skipping"
             fi
           done
 
@@ -204,8 +223,11 @@ jobs:
         run: |
           if grep -q ':' new_incidents.txt; then
             echo "has_updates=true" >> $GITHUB_OUTPUT
+            echo "Found new incidents to notify"
+            cat new_incidents.txt
           else
             echo "has_updates=false" >> $GITHUB_OUTPUT
+            echo "No new incidents to notify"
           fi
 
       - name: Send Slack notifications
@@ -223,6 +245,7 @@ jobs:
             date -u -d "$date_str" '+%b %d, %H:%M UTC' 2>/dev/null || echo "$date_str"
           }
 
+          echo "Sending Slack notifications..."
           IFS=$'\n' read -d '' -r -a messages < new_incidents.txt || true
           i=0
           while [ $i -lt ${#messages[@]} ]; do
@@ -240,6 +263,8 @@ jobs:
               url=$(echo ${messages[$((i+7))]} | sed 's/URL: //')
               shortlink=$(echo ${messages[$((i+8))]} | sed 's/Shortlink: //')
 
+              echo "Processing notification for incident: $id ($name)"
+
               # Format timestamps
               formatted_created_at=$(format_date "$created_at")
               formatted_updated_at=$(format_date "$updated_at")
@@ -254,6 +279,7 @@ jobs:
                 message="⚠️ *Updated GitHub Incident*\n*$name*\nStatus: *$status*\n📅 Updated At: $formatted_updated_at\n🔗 $shortlink"
               fi
 
+              echo "Sending message to Slack..."
               payload=$(jq -n \
                 --arg text "$message" \
                 '{text: $text}')
@@ -262,6 +288,7 @@ jobs:
                 --max-time 10 \
                 --data "$payload" "$SLACK_WEBHOOK"
 
+              echo "Updating cache..."
               # Update cache
               grep -v "^$id:" .incident_cache > .incident_cache.tmp
               mv .incident_cache.tmp .incident_cache
@@ -276,6 +303,7 @@ jobs:
           name: incident-cache
           path: .incident_cache
           retention-days: 7
+          if-no-files-found: error
 
       - name: Save cache to workspace
         if: always()
