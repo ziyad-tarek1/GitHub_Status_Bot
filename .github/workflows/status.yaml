@@ -1,3 +1,316 @@
+# name:  new GitHub Status and Notify Slack
+
+# on:
+#   schedule:
+#     - cron: '*/20 * * * *'
+#   workflow_dispatch:
+
+# jobs:
+#   check-status:
+#     runs-on: ubuntu-latest
+#     steps:
+#       - name: Show current run time
+#         run: |
+#           echo "Current workflow run time: $(date -u +"%Y-%m-%dT%H:%M:%S.%3NZ")"
+#           echo "This time will be used as reference for the 20-minute window check"
+
+#       - name: Checkout repository
+#         uses: actions/checkout@v3
+
+#       - name: Get previous run ID
+#         id: previous_run
+#         run: |
+#           # Get the current workflow ID
+#           echo "Getting workflow ID..."
+#           response=$(curl -s -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+#             "https://api.github.com/repos/${{ github.repository }}/actions/workflows")
+          
+#           echo "API Response:"
+#           echo "$response" | jq '.'
+          
+#           workflow_id=$(echo "$response" | jq -r '.workflows[] | select(.name == "new GitHub Status and Notify Slack") | .id')
+          
+#           if [ -z "$workflow_id" ] || [ "$workflow_id" = "null" ]; then
+#             echo "Error: Could not find workflow ID. Available workflows:"
+#             echo "$response" | jq -r '.workflows[].name'
+#             exit 1
+#           fi
+          
+#           echo "Workflow ID: $workflow_id"
+          
+#           # Get the previous successful run (excluding current run)
+#           echo "Getting previous successful run..."
+#           current_run_id=${{ github.run_id }}
+#           echo "Current run ID: $current_run_id"
+          
+#           runs_response=$(curl -s -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+#             "https://api.github.com/repos/${{ github.repository }}/actions/workflows/$workflow_id/runs?status=success&branch=${{ github.ref_name }}&per_page=2")
+          
+#           echo "Runs API Response:"
+#           echo "$runs_response" | jq '.'
+          
+#           previous_run_id=$(echo "$runs_response" | jq -r ".workflow_runs[] | select(.id != $current_run_id) | .id" | head -n 1)
+          
+#           echo "Previous run ID: $previous_run_id"
+          
+#           if [ "$previous_run_id" = "null" ] || [ -z "$previous_run_id" ]; then
+#             echo "No previous successful run found"
+#             echo "previous_run_id=" >> $GITHUB_OUTPUT
+#           else
+#             echo "Found previous successful run: $previous_run_id"
+#             echo "previous_run_id=$previous_run_id" >> $GITHUB_OUTPUT
+#           fi
+
+#       - name: Download previous cache
+#         if: steps.previous_run.outputs.previous_run_id != ''
+#         uses: actions/download-artifact@v4
+#         with:
+#           name: incident-cache
+#           path: .
+#           github-token: ${{ secrets.GITHUB_TOKEN }}
+#           repository: ${{ github.repository }}
+#           run-id: ${{ steps.previous_run.outputs.previous_run_id }}
+#         continue-on-error: true
+
+#       - name: Set up incident cache file
+#         run: |
+#           if [ ! -f .incident_cache ]; then
+#             touch .incident_cache
+#             echo "Created new cache file"
+#           else
+#             echo "Using existing cache file"
+#             cat .incident_cache
+#           fi
+#           # Ensure file exists and is writable
+#           touch .incident_cache
+#           chmod 777 .incident_cache
+#           echo "Cache file permissions:"
+#           ls -l .incident_cache
+
+#       - name: Fetch and filter incidents
+#         id: filter
+#         run: |
+#           # Function to convert ISO date to epoch
+#           convert_to_epoch() {
+#             local date_str=$1
+#             if [ -z "$date_str" ] || [ "$date_str" = "null" ]; then
+#               echo "0"
+#               return
+#             fi
+#             date -u -d "$date_str" +%s 2>/dev/null || echo "0"
+#           }
+
+#           # Function to format date for display
+#           format_date() {
+#             local date_str=$1
+#             if [ -z "$date_str" ] || [ "$date_str" = "null" ]; then
+#               echo "N/A"
+#               return
+#             fi
+#             date -u -d "$date_str" '+%b %d, %H:%M UTC' 2>/dev/null || echo "$date_str"
+#           }
+
+#           # Function to validate JSON response
+#           validate_json() {
+#             if ! jq empty "$1" 2>/dev/null; then
+#               echo "Error: Invalid JSON response from GitHub Status API"
+#               exit 1
+#             fi
+#           }
+
+#           # Function to safely update cache
+#           update_cache() {
+#             local id=$1
+#             local updated_at=$2
+#             local status=$3
+#             local temp_file=$(mktemp)
+            
+#             echo "Updating cache for incident $id"
+#             echo "Current cache contents:"
+#             cat .incident_cache
+            
+#             # Remove old entry if exists
+#             grep -v "^$id:" .incident_cache > "$temp_file" 2>/dev/null || true
+#             # Add new entry
+#             echo "$id:$updated_at:$status" >> "$temp_file"
+#             # Replace cache file
+#             mv "$temp_file" .incident_cache
+#             chmod 777 .incident_cache
+            
+#             echo "Updated cache contents:"
+#             cat .incident_cache
+#           }
+
+#           # Fetch and validate incidents
+#           echo "Fetching incidents from GitHub Status API..."
+#           curl -s --max-time 10 https://www.githubstatus.com/api/v2/incidents.json > incidents.json
+#           validate_json incidents.json
+
+#           NOW=$(date +%s)
+#           echo "" > new_incidents.txt
+
+#           echo "Processing incidents..."
+#           jq -c '.incidents[]' incidents.json | while read -r incident; do
+#             id=$(echo "$incident" | jq -r '.id')
+#             name=$(echo "$incident" | jq -r '.name')
+#             status=$(echo "$incident" | jq -r '.status')
+#             created_at=$(echo "$incident" | jq -r '.created_at')
+#             updated_at=$(echo "$incident" | jq -r '.updated_at')
+#             resolved_at=$(echo "$incident" | jq -r '.resolved_at')
+#             shortlink=$(echo "$incident" | jq -r '.shortlink')
+#             url="https://www.githubstatus.com/incidents/$id"
+
+#             # Convert timestamps to epoch
+#             created_epoch=$(convert_to_epoch "$created_at")
+#             updated_epoch=$(convert_to_epoch "$updated_at")
+#             resolved_epoch=$(convert_to_epoch "$resolved_at")
+            
+#             # Calculate time differences
+#             created_age=$((NOW - created_epoch))
+#             updated_age=$((NOW - updated_epoch))
+#             resolved_age=$((NOW - resolved_epoch))
+
+#             echo "Processing incident: $id ($name)"
+#             echo "  Status: $status"
+#             echo "  Updated age: $updated_age seconds"
+
+#             # Check if this is a recent update (within last 20 minutes)
+#             if [ $updated_age -le 1200 ]; then
+#               echo "  Recent update found (within 20 minutes)"
+#               cached_entry=$(grep "^$id:" .incident_cache || true)
+#               cached_updated_at=$(echo "$cached_entry" | cut -d':' -f2)
+#               cached_status=$(echo "$cached_entry" | cut -d':' -f3)
+
+#               echo "  Cache entry: $cached_entry"
+#               echo "  Cached updated_at: $cached_updated_at"
+#               echo "  Cached status: $cached_status"
+
+#               # Only process if status changed or not in cache
+#               if [ "$cached_updated_at" != "$updated_at" ] || [ "$cached_status" != "$status" ]; then
+#                 echo "  Changes detected - will send notification"
+#                 echo "$id:$updated_at:$status" >> new_incidents.txt
+#                 echo "---" >> new_incidents.txt
+#                 echo "Name: $name" >> new_incidents.txt
+#                 echo "Status: $status" >> new_incidents.txt
+#                 echo "Created: $created_at" >> new_incidents.txt
+#                 echo "Updated: $updated_at" >> new_incidents.txt
+#                 echo "Resolved: $resolved_at" >> new_incidents.txt
+#                 echo "URL: $url" >> new_incidents.txt
+#                 echo "Shortlink: $shortlink" >> new_incidents.txt
+                
+#                 # Update cache immediately
+#                 update_cache "$id" "$updated_at" "$status"
+#               else
+#                 echo "  No changes detected - skipping"
+#               fi
+#             else
+#               echo "  Not a recent update - skipping"
+#               # Still update cache for non-recent incidents to maintain state
+#               update_cache "$id" "$updated_at" "$status"
+#             fi
+#           done
+
+#       - name: Check if there are new incidents
+#         id: check
+#         run: |
+#           if grep -q ':' new_incidents.txt; then
+#             echo "has_updates=true" >> $GITHUB_OUTPUT
+#             echo "Found new incidents to notify"
+#             cat new_incidents.txt
+#           else
+#             echo "has_updates=false" >> $GITHUB_OUTPUT
+#             echo "No new incidents to notify"
+#           fi
+
+#       - name: Send Slack notifications
+#         if: steps.check.outputs.has_updates == 'true'
+#         env:
+#           SLACK_WEBHOOK: ${{ secrets.SLACK_WEBHOOK }}
+#         run: |
+#           # Function to format date for display
+#           format_date() {
+#             local date_str=$1
+#             if [ -z "$date_str" ] || [ "$date_str" = "null" ]; then
+#               echo "N/A"
+#               return
+#             fi
+#             date -u -d "$date_str" '+%b %d, %H:%M UTC' 2>/dev/null || echo "$date_str"
+#           }
+
+#           echo "Sending Slack notifications..."
+#           IFS=$'\n' read -d '' -r -a messages < new_incidents.txt || true
+#           i=0
+#           while [ $i -lt ${#messages[@]} ]; do
+#             if [[ ${messages[$i]} == *:* ]]; then
+#               id_updated_status=${messages[$i]}
+#               id=$(echo $id_updated_status | cut -d: -f1)
+#               updated_at=$(echo $id_updated_status | cut -d: -f2)
+#               status=$(echo $id_updated_status | cut -d: -f3)
+
+#               name=$(echo ${messages[$((i+2))]} | sed 's/Name: //')
+#               status=$(echo ${messages[$((i+3))]} | sed 's/Status: //')
+#               created_at=$(echo ${messages[$((i+4))]} | sed 's/Created: //')
+#               updated_at=$(echo ${messages[$((i+5))]} | sed 's/Updated: //')
+#               resolved_at=$(echo ${messages[$((i+6))]} | sed 's/Resolved: //')
+#               url=$(echo ${messages[$((i+7))]} | sed 's/URL: //')
+#               shortlink=$(echo ${messages[$((i+8))]} | sed 's/Shortlink: //')
+
+#               echo "Processing notification for incident: $id ($name)"
+
+#               # Format timestamps
+#               formatted_created_at=$(format_date "$created_at")
+#               formatted_updated_at=$(format_date "$updated_at")
+#               formatted_resolved_at=$(format_date "$resolved_at")
+
+#               # Determine message type and format
+#               if [ "$status" = "resolved" ]; then
+#                 message="✅ *Resolved GitHub Incident*\n*$name*\nStatus: *$status*\n📅 Resolved At: $formatted_resolved_at\n🔗 $shortlink"
+#               elif [ "$created_at" = "$updated_at" ]; then
+#                 message="🚨 *New GitHub Incident*\n*$name*\nStatus: *$status*\n📅 Created At: $formatted_created_at\n🔗 $shortlink"
+#               else
+#                 message="⚠️ *Updated GitHub Incident*\n*$name*\nStatus: *$status*\n📅 Updated At: $formatted_updated_at\n🔗 $shortlink"
+#               fi
+
+#               echo "Sending message to Slack..."
+#               payload=$(jq -n \
+#                 --arg text "$message" \
+#                 '{text: $text}')
+
+#               curl -X POST -H 'Content-type: application/json' \
+#                 --max-time 10 \
+#                 --data "$payload" "$SLACK_WEBHOOK"
+#             fi
+#             i=$((i+10))
+#           done
+
+#       - name: Verify cache file
+#         run: |
+#           echo "Verifying cache file before upload..."
+#           ls -l .incident_cache
+#           cat .incident_cache
+#           chmod 777 .incident_cache
+
+#       - name: Prepare cache for upload
+#         run: |
+#           echo "Preparing cache file for upload..."
+#           cp .incident_cache incident-cache
+#           chmod 777 incident-cache
+#           ls -l incident-cache
+
+#       - name: Upload cache as artifact
+#         uses: actions/upload-artifact@v4
+#         with:
+#           name: incident-cache
+#           path: incident-cache
+#           retention-days: 7
+#           if-no-files-found: error
+
+#       - name: Save cache to workspace
+#         if: always()
+#         run: |
+#           echo "Final incident cache:"
+#           cat .incident_cache
+
 name:  new GitHub Status and Notify Slack
 
 on:
@@ -74,15 +387,16 @@ jobs:
 
       - name: Set up incident cache file
         run: |
-          if [ ! -f .incident_cache ]; then
-            touch .incident_cache
-            echo "Created new cache file"
-          else
-            echo "Using existing cache file"
+          if [ -f incident-cache ]; then
+            echo "Using downloaded cache file"
+            mv incident-cache .incident_cache
+            echo "Cache contents:"
             cat .incident_cache
+          else
+            echo "No previous cache found, creating new cache file"
+            touch .incident_cache
           fi
           # Ensure file exists and is writable
-          touch .incident_cache
           chmod 777 .incident_cache
           echo "Cache file permissions:"
           ls -l .incident_cache
