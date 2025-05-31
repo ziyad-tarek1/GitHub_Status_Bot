@@ -237,11 +237,18 @@ jobs:
           cat .incident_cache
           chmod 777 .incident_cache
 
+      - name: Prepare cache for upload
+        run: |
+          echo "Preparing cache file for upload..."
+          cp .incident_cache incident-cache
+          chmod 777 incident-cache
+          ls -l incident-cache
+
       - name: Upload cache as artifact
         uses: actions/upload-artifact@v4
         with:
           name: incident-cache
-          path: .incident_cache
+          path: incident-cache
           retention-days: 7
           if-no-files-found: error
 
