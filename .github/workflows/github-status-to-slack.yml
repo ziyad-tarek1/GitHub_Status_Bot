@@ -16,12 +16,20 @@ jobs:
         id: previous_run
         run: |
           # Get the current workflow ID
+          echo "Getting workflow ID..."
           workflow_id=$(curl -s -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
-            "https://api.github.com/repos/${{ github.repository }}/actions/workflows/$(basename $GITHUB_WORKFLOW_REF)" | jq -r '.id')
+            "https://api.github.com/repos/${{ github.repository }}/actions/workflows" | \
+            jq -r '.workflows[] | select(.name == "Check GitHub Status and Notify Slack") | .id')
+          
+          echo "Workflow ID: $workflow_id"
           
           # Get the previous successful run
+          echo "Getting previous successful run..."
           previous_run_id=$(curl -s -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
-            "https://api.github.com/repos/${{ github.repository }}/actions/workflows/$workflow_id/runs?status=success&branch=${{ github.ref_name }}&per_page=1" | jq -r '.workflow_runs[0].id')
+            "https://api.github.com/repos/${{ github.repository }}/actions/workflows/$workflow_id/runs?status=success&branch=${{ github.ref_name }}&per_page=1" | \
+            jq -r '.workflow_runs[0].id')
+          
+          echo "Previous run ID: $previous_run_id"
           
           if [ "$previous_run_id" = "null" ] || [ -z "$previous_run_id" ]; then
             echo "No previous successful run found"
