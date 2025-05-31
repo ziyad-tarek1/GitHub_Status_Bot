@@ -30,7 +30,7 @@ jobs:
           fi
           # Ensure file exists and is writable
           touch .incident_cache
-          chmod 644 .incident_cache
+          chmod 777 .incident_cache
           echo "Cache file permissions:"
           ls -l .incident_cache
 
@@ -82,6 +82,7 @@ jobs:
             echo "$id:$updated_at:$status" >> "$temp_file"
             # Replace cache file
             mv "$temp_file" .incident_cache
+            chmod 777 .incident_cache
             
             echo "Updated cache contents:"
             cat .incident_cache
@@ -234,6 +235,7 @@ jobs:
           echo "Verifying cache file before upload..."
           ls -l .incident_cache
           cat .incident_cache
+          chmod 777 .incident_cache
 
       - name: Upload cache as artifact
         uses: actions/upload-artifact@v4
