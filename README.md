@@ -1,115 +1,118 @@
-# 🛠️ GitHub Status Bot
+# GitHub Status Bot
 
-This GitHub Action periodically checks the [GitHub Status API](https://www.githubstatus.com) for new or updated **incidents** and sends formatted alerts to a Slack channel via webhook.
+A GitHub Actions workflow that monitors GitHub's status page and sends notifications to Slack when incidents are detected.
 
-Incidents include disruptions or outages across GitHub services like:
-- GitHub Actions
-- Git operations
-- Codespaces
-- API services
-- Webhooks
-- Pages
-- And more...
+## Features
 
-## 📦 Features
+- 🔍 Monitors GitHub Status API every 20 minutes
+- 🔔 Sends real-time notifications to Slack for:
+  - 🚨 New incidents
+  - ⚠️ Updated incidents
+  - ✅ Resolved incidents
+- 💾 Maintains a cache of incidents to prevent duplicate notifications
+- 🔄 Persists cache between workflow runs
+- ⏰ Configurable monitoring interval
+- 🛠️ Manual trigger support
 
-- ✅ Detects newly created or recently updated incidents
-- 🔁 Skips older incidents (>12 hours old)
-- 🧠 Remembers what’s already sent (caching to prevent duplicates)
-- 🚀 Posts alerts to Slack with direct incident links
-- 🕰️ Scheduled to run every 20 minutes
+## Setup
 
----
+1. **Fork this repository**
 
-## 🔧 Workflow Setup
+2. **Add Slack Webhook**
+   - Go to your Slack workspace
+   - Create a new app or use an existing one
+   - Enable Incoming Webhooks
+   - Create a new webhook URL
+   - Add the webhook URL as a repository secret named `SLACK_WEBHOOK`
 
-This GitHub Actions workflow is scheduled and manually dispatchable:
+3. **Enable GitHub Actions**
+   - Go to your repository settings
+   - Navigate to Actions > General
+   - Enable "Allow all actions and reusable workflows"
 
-```yaml
-name: GitHub Status Multi-Incident Monitor
+## How It Works
 
-on:
-  schedule:
-    - cron: '*/20 * * * *'
-  workflow_dispatch:
-````
+1. **Monitoring**
+   - Runs every 20 minutes via cron schedule
+   - Can be triggered manually via workflow_dispatch
+   - Fetches incidents from GitHub Status API
 
-It runs a single job:
+2. **Incident Processing**
+   - Checks for incidents within the last 20 minutes
+   - Compares with cached incidents to detect changes
+   - Categorizes incidents as new, updated, or resolved
 
-* **Checks out the repo**
-* **Restores a local incident log cache**
-* **Fetches live incidents from GitHub Status API**
-* **Compares with previous log**
-* **Posts new/resolved events to Slack**
-* **Saves the updated log to cache**
+3. **Notifications**
+   - Sends formatted messages to Slack
+   - Includes incident details:
+     - Name and status
+     - Creation/update/resolution times
+     - Direct link to incident
 
----
+4. **Cache Management**
+   - Maintains a cache of all incidents
+   - Persists between workflow runs
+   - Prevents duplicate notifications
+   - 7-day retention period
 
-## 💬 Slack Alerts
+## Message Formats
 
-You’ll receive messages like:
-
+### New Incident
 ```
-✅ Resolved GitHub Incident: Delayed GitHub Actions Jobs
-Status: resolved
-📅 Resolved At: 2025-05-22T09:17:56.960Z
-🔗 https://stspg.io/frxj4njt4g76
+🚨 *New GitHub Incident*
+*[Incident Name]*
+Status: *[Status]*
+📅 Created At: [Timestamp]
+🔗 [Shortlink]
 ```
 
-Or for new disruptions:
-
+### Updated Incident
 ```
-🚨 New GitHub Incident: Degraded GitHub API performance
-Status: investigating
-📅 Created At: 2025-05-28T14:12:03.452Z
-🔗 https://stspg.io/7xj29k5
+⚠️ *Updated GitHub Incident*
+*[Incident Name]*
+Status: *[Status]*
+📅 Updated At: [Timestamp]
+🔗 [Shortlink]
 ```
----
 
-## 🧪 Environment Variables
-
-You must define the following **repository secret**:
-
-| Secret Name         | Description                         |
-| ------------------- | ----------------------------------- |
-| `SLACK_WEBHOOK_URL` | Slack webhook URL for notifications |
-
-## 🗂️ Caching Behavior
-
-The workflow uses GitHub Actions' cache to store a file `.gh-status/incident_log.json` that tracks which incidents (by `id` + `status`) have already been sent.
-
-This avoids duplicate alerts.
-
----
-
-
-### ⚠️ Known Limitation
-
-If the cache fails to save (e.g. due to multiple concurrent runs), the next run may reprocess old incidents. To avoid this:
-
-* You can improve the cache key to use a dynamic key per-run with a shared restore key (see Issues section below).
----
-
-## 📁 File Structure
-
-```text
-.gh-status/
-├── incidents.json         ← Fetched from GitHub Status API
-└── incident_log.json      ← Tracks posted incident `id` + `status`
+### Resolved Incident
 ```
----
+✅ *Resolved GitHub Incident*
+*[Incident Name]*
+Status: *[Status]*
+📅 Resolved At: [Timestamp]
+🔗 [Shortlink]
+```
 
-## 🛠️ Improvements & To-do
+## Configuration
 
-* [ ] Improve caching strategy with dynamic keys to avoid save conflicts
-* [ ] Store incident log in repo or external DB to persist more reliably
-* [ ] Enhance support for incident groups / subcomponents
-* [ ] Add tests or local dry-run script
+The workflow can be configured by modifying the following in `githubstatus.yaml`:
 
----
+- `cron: '*/20 * * * *'` - Change the monitoring interval
+- `retention-days: 7` - Adjust cache retention period
+- Message formats in the Slack notification step
 
-## 🧾 License
+## Troubleshooting
 
-MIT License © 2025
+1. **No Notifications**
+   - Check if the workflow is running (Actions tab)
+   - Verify Slack webhook URL is correct
+   - Check workflow logs for any errors
 
+2. **Duplicate Notifications**
+   - Verify cache is being maintained
+   - Check if previous run was successful
+   - Look for any cache download errors
 
+3. **Workflow Not Running**
+   - Check repository permissions
+   - Verify Actions are enabled
+   - Check cron schedule syntax
+
+## Contributing
+
+Feel free to submit issues and enhancement requests!
+
+## License
+
+This project is licensed under the MIT License - see the LICENSE file for details. 
